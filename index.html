@@ -83,17 +83,22 @@
     <button onclick="sendComment()">💬 发送评论</button>
   </div>
 
-  <!-- 引入 Pusher 官方 JS -->
+  <!-- Pusher 官方 JS -->
   <script src="https://js.pusher.com/8.0.1/pusher.min.js"></script>
 
   <script>
     // ======================================
-    // 已填入你的专属 Pusher 密钥
+    // 你的 Pusher 专属密钥（已填好）
     // ======================================
-    const pusher = new Pusher("8cefeeb240825fe33ba3", {
-      cluster: "ap3"
-    });
-    const channel = pusher.subscribe("photo-wall");
+    const PUSHER_KEY = "8cefeeb240825fe33ba3";
+    const PUSHER_CLUSTER = "ap3";
+    const PUSHER_APP_ID = "2138688";
+    const PUSHER_SECRET = "1271c274a381c8215d9c";
+    const CHANNEL_NAME = "photo-wall";
+
+    // 初始化 Pusher
+    const pusher = new Pusher(PUSHER_KEY, { cluster: PUSHER_CLUSTER });
+    const channel = pusher.subscribe(CHANNEL_NAME);
 
     // 全局数据
     let photos = [];
@@ -102,17 +107,35 @@
     const fileInput = document.getElementById('file');
 
     // ======================================
-    // 监听全设备实时同步消息
+    // 监听实时消息（修复版，无报错）
     // ======================================
-    // 接收照片
-    channel.bind('client-new-photo', (data) => {
+    channel.bind('new-photo', (data) => {
       photos.push(data.url);
     });
-    // 接收评论
-    channel.bind('client-new-comment', (data) => {
+
+    channel.bind('new-comment', (data) => {
       comments.push(data.text);
       playOneComment(data.text);
     });
+
+    // ======================================
+    // 发送事件到 Pusher（修复核心代码）
+    // ======================================
+    function sendPusherEvent(eventName, data) {
+      const url = `https://api-${PUSHER_CLUSTER}.pusher.com/apps/${PUSHER_APP_ID}/events`;
+      const body = new URLSearchParams();
+      body.append('name', eventName);
+      body.append('channels', CHANNEL_NAME);
+      body.append('data', JSON.stringify(data));
+      body.append('auth_key', PUSHER_KEY);
+      body.append('auth_secret', PUSHER_SECRET);
+
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body
+      });
+    }
 
     // ======================================
     // 选择照片
@@ -122,7 +145,7 @@
     }
 
     // ======================================
-    // 照片转Base64（跨设备可用）
+    // 照片转Base64
     // ======================================
     function fileToBase64(file) {
       return new Promise(resolve => {
@@ -133,29 +156,27 @@
     }
 
     // ======================================
-    // 上传照片 + 同步所有设备
+    // 上传照片（同步全设备）
     // ======================================
     fileInput.onchange = async (e) => {
       const file = e.target.files[0];
       if (!file) return;
       const base64 = await fileToBase64(file);
-      // 广播给所有设备
-      channel.trigger('client-new-photo', { url: base64 });
+      sendPusherEvent('new-photo', { url: base64 });
     };
 
     // ======================================
-    // 发送评论 + 同步所有设备
+    // 发送评论（同步全设备）
     // ======================================
     function sendComment() {
       const text = msgInput.value.trim();
       if (!text) return;
       msgInput.value = '';
-      // 广播给所有设备
-      channel.trigger('client-new-comment', { text: text });
+      sendPusherEvent('new-comment', { text: text });
     }
 
     // ======================================
-    // 评论飘屏播放
+    // 评论飘屏
     // ======================================
     function playOneComment(text) {
       const div = document.createElement('div');
@@ -187,14 +208,12 @@
     }
 
     // ======================================
-    // 自动循环播放
+    // 自动循环
     // ======================================
-    // 循环评论
     setInterval(() => {
       if (comments.length) playOneComment(comments[Math.floor(Math.random() * comments.length)]);
     }, 4000);
 
-    // 循环照片
     setInterval(() => {
       playRandomPhoto();
     }, 2000);
