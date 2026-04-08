@@ -83,20 +83,20 @@
     <button onclick="sendComment()">💬 发送评论</button>
   </div>
 
-  <!-- Pusher 官方 JS -->
+  <!-- 引入 Pusher 官方 JS -->
   <script src="https://js.pusher.com/8.0.1/pusher.min.js"></script>
 
   <script>
     // ======================================
-    // 你的 Pusher 专属密钥（已填好）
+    // 你的专属 Pusher 配置（已填好）
     // ======================================
-    const PUSHER_KEY = "8cefeeb240825fe33ba3";
-    const PUSHER_CLUSTER = "ap3";
     const PUSHER_APP_ID = "2138688";
+    const PUSHER_KEY = "8cefeeb240825fe33ba3";
     const PUSHER_SECRET = "1271c274a381c8215d9c";
+    const PUSHER_CLUSTER = "ap3";
     const CHANNEL_NAME = "photo-wall";
 
-    // 初始化 Pusher
+    // 初始化 Pusher（仅用于接收消息）
     const pusher = new Pusher(PUSHER_KEY, { cluster: PUSHER_CLUSTER });
     const channel = pusher.subscribe(CHANNEL_NAME);
 
@@ -107,34 +107,45 @@
     const fileInput = document.getElementById('file');
 
     // ======================================
-    // 监听实时消息（修复版，无报错）
+    // 监听 Pusher 服务端事件（接收消息）
     // ======================================
+    // 接收照片消息
     channel.bind('new-photo', (data) => {
       photos.push(data.url);
     });
-
+    // 接收评论消息
     channel.bind('new-comment', (data) => {
       comments.push(data.text);
-      playOneComment(data.text);
+      playOneComment(data.text); // 立即播放新评论
     });
 
     // ======================================
-    // 发送事件到 Pusher（修复核心代码）
+    // 核心修复：用 HTTP API 发送服务端事件（绕过客户端事件限制）
     // ======================================
-    function sendPusherEvent(eventName, data) {
-      const url = `https://api-${PUSHER_CLUSTER}.pusher.com/apps/${PUSHER_APP_ID}/events`;
-      const body = new URLSearchParams();
-      body.append('name', eventName);
-      body.append('channels', CHANNEL_NAME);
-      body.append('data', JSON.stringify(data));
-      body.append('auth_key', PUSHER_KEY);
-      body.append('auth_secret', PUSHER_SECRET);
+    async function sendPusherEvent(eventName, data) {
+      // Pusher 服务端 API 地址
+      const apiUrl = `https://api-${PUSHER_CLUSTER}.pusher.com/apps/${PUSHER_APP_ID}/events`;
+      
+      // 构造请求参数（Pusher 要求的格式）
+      const params = new URLSearchParams();
+      params.append('name', eventName);       // 事件名（无 client- 前缀）
+      params.append('channels', CHANNEL_NAME); // 频道名
+      params.append('data', JSON.stringify(data)); // 消息内容
+      params.append('auth_key', PUSHER_KEY);  // 你的 key
+      params.append('auth_secret', PUSHER_SECRET); // 你的 secret
+      params.append('auth_timestamp', Math.floor(Date.now() / 1000)); // 时间戳
+      params.append('auth_version', '1.0');   // 版本固定
 
-      fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body
-      });
+      try {
+        // 发送 POST 请求到 Pusher 服务端 API
+        await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params
+        });
+      } catch (err) {
+        console.log('发送消息失败:', err);
+      }
     }
 
     // ======================================
@@ -145,7 +156,7 @@
     }
 
     // ======================================
-    // 照片转Base64
+    // 照片转 Base64（跨设备可用）
     // ======================================
     function fileToBase64(file) {
       return new Promise(resolve => {
@@ -156,27 +167,29 @@
     }
 
     // ======================================
-    // 上传照片（同步全设备）
+    // 上传照片（同步到所有设备）
     // ======================================
     fileInput.onchange = async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      const base64 = await fileToBase64(file);
-      sendPusherEvent('new-photo', { url: base64 });
+      const base64Url = await fileToBase64(file);
+      // 发送服务端事件（无 client- 前缀）
+      sendPusherEvent('new-photo', { url: base64Url });
     };
 
     // ======================================
-    // 发送评论（同步全设备）
+    // 发送评论（同步到所有设备）
     // ======================================
     function sendComment() {
       const text = msgInput.value.trim();
       if (!text) return;
       msgInput.value = '';
+      // 发送服务端事件（无 client- 前缀）
       sendPusherEvent('new-comment', { text: text });
     }
 
     // ======================================
-    // 评论飘屏
+    // 评论飘屏播放
     // ======================================
     function playOneComment(text) {
       const div = document.createElement('div');
@@ -192,14 +205,16 @@
     // ======================================
     function playRandomPhoto() {
       if (photos.length === 0) return;
-      const url = photos[Math.floor(Math.random() * photos.length)];
+      const randomUrl = photos[Math.floor(Math.random() * photos.length)];
       const img = new Image();
-      img.src = url;
+      img.src = randomUrl;
       img.className = 'flying-photo';
 
+      // 随机大小（100~280px）
       const size = Math.random() * 180 + 100;
       img.style.width = size + 'px';
       img.style.height = size + 'px';
+      // 随机位置
       img.style.left = Math.random() * (window.innerWidth - size) + 'px';
       img.style.top = Math.random() * (window.innerHeight - size) + 'px';
 
@@ -208,12 +223,17 @@
     }
 
     // ======================================
-    // 自动循环
+    // 自动循环播放
     // ======================================
+    // 循环播放评论
     setInterval(() => {
-      if (comments.length) playOneComment(comments[Math.floor(Math.random() * comments.length)]);
+      if (comments.length > 0) {
+        const randomText = comments[Math.floor(Math.random() * comments.length)];
+        playOneComment(randomText);
+      }
     }, 4000);
 
+    // 循环播放照片
     setInterval(() => {
       playRandomPhoto();
     }, 2000);
