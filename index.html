@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>实时互动照片墙（多端同步）</title>
+  <title>实时互动照片墙（全设备同步）</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #0a0a0a; overflow: hidden; font-family: Arial; }
 
-    /* 评论飘屏 */
+    /* 评论飘屏动画 */
     .comment {
       position: fixed;
       background: rgba(255,255,255,0.95);
@@ -28,7 +28,7 @@
       100% { transform: translateY(-100px); opacity: 0; }
     }
 
-    /* 随机照片 */
+    /* 随机照片动画 */
     .flying-photo {
       position: fixed;
       object-fit: cover;
@@ -43,7 +43,7 @@
       100% { opacity: 0; transform: scale(0.8); }
     }
 
-    /* 上传栏 */
+    /* 上传操作栏 */
     .upload-panel {
       position: fixed;
       bottom: 20px;
@@ -83,31 +83,36 @@
     <button onclick="sendComment()">💬 发送评论</button>
   </div>
 
+  <!-- 引入 Pusher 官方 JS -->
+  <script src="https://js.pusher.com/8.0.1/pusher.min.js"></script>
+
   <script>
     // ======================================
-    // 核心：原生实时同步通道（多设备秒同步）
+    // 已填入你的专属 Pusher 密钥
     // ======================================
-    const channel = new BroadcastChannel('photo_wall');
+    const pusher = new Pusher("8cefeeb240825fe33ba3", {
+      cluster: "ap3"
+    });
+    const channel = pusher.subscribe("photo-wall");
+
+    // 全局数据
     let photos = [];
     let comments = [];
-
-    // DOM
     const msgInput = document.getElementById('msg');
     const fileInput = document.getElementById('file');
 
     // ======================================
-    // 监听其他设备发送的消息
+    // 监听全设备实时同步消息
     // ======================================
-    channel.onmessage = (e) => {
-      const data = e.data;
-      if (data.type === 'photo') {
-        photos.push(data.url);
-      }
-      if (data.type === 'comment') {
-        comments.push(data.text);
-        playOneComment(data.text); // 直接播放
-      }
-    };
+    // 接收照片
+    channel.bind('client-new-photo', (data) => {
+      photos.push(data.url);
+    });
+    // 接收评论
+    channel.bind('client-new-comment', (data) => {
+      comments.push(data.text);
+      playOneComment(data.text);
+    });
 
     // ======================================
     // 选择照片
@@ -134,9 +139,8 @@
       const file = e.target.files[0];
       if (!file) return;
       const base64 = await fileToBase64(file);
-      photos.push(base64);
-      // 广播给所有打开网页的设备
-      channel.postMessage({ type: 'photo', url: base64 });
+      // 广播给所有设备
+      channel.trigger('client-new-photo', { url: base64 });
     };
 
     // ======================================
@@ -145,14 +149,13 @@
     function sendComment() {
       const text = msgInput.value.trim();
       if (!text) return;
-      comments.push(text);
       msgInput.value = '';
-      // 广播给所有打开网页的设备
-      channel.postMessage({ type: 'comment', text: text });
+      // 广播给所有设备
+      channel.trigger('client-new-comment', { text: text });
     }
 
     // ======================================
-    // 评论飘屏
+    // 评论飘屏播放
     // ======================================
     function playOneComment(text) {
       const div = document.createElement('div');
@@ -164,7 +167,7 @@
     }
 
     // ======================================
-    // 随机播放照片
+    // 随机照片播放
     // ======================================
     function playRandomPhoto() {
       if (photos.length === 0) return;
@@ -184,12 +187,14 @@
     }
 
     // ======================================
-    // 自动循环
+    // 自动循环播放
     // ======================================
+    // 循环评论
     setInterval(() => {
       if (comments.length) playOneComment(comments[Math.floor(Math.random() * comments.length)]);
     }, 4000);
 
+    // 循环照片
     setInterval(() => {
       playRandomPhoto();
     }, 2000);
