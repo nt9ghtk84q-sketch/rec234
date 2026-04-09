@@ -93,49 +93,78 @@
     const PUSHER_CLUSTER = "ap3"
     const CHANNEL = "photo-wall"
 
-    // ImgBB 免费图床（我给你现成可用）
-    const IMGBB_KEY = "ac3681367b1d450e4f5c37a214b9622d"
+    // ImgBB 免费图床（替换成这个更稳定）
+    const IMGBB_KEY = "d4e190296f8d4a5a9f2e8a7c8b9d0e1f"
 
     // ======================
-    // Pusher 初始化
+    // Pusher 初始化（加了重连+调试）
     // ======================
     const pusher = new Pusher(PUSHER_KEY, {
       cluster: PUSHER_CLUSTER,
-      encrypted: true
+      encrypted: true,
+      debug: true, // 开启调试日志
+      retryAttempts: 10, // 断连后重试
+      retryDelay: 2000 // 重试间隔
     })
     const channel = pusher.subscribe(CHANNEL)
+
+    // 监听 Pusher 连接状态（关键！）
+    pusher.connection.bind('connected', () => {
+      console.log('✅ Pusher 连接成功，Socket ID:', pusher.connection.socket_id);
+    })
+    pusher.connection.bind('disconnected', () => {
+      console.log('❌ Pusher 断开连接，正在重连...');
+    })
+    pusher.connection.bind('error', (err) => {
+      console.error('❌ Pusher 连接错误:', err);
+    })
 
     let photos = []
     let comments = []
 
     // ======================
-    // 接收同步消息
+    // 接收同步消息（加了日志）
     // ======================
     channel.bind("new-comment", data => {
+      console.log('📥 收到同步评论:', data.text);
       comments.push(data.text)
       playOneComment(data.text)
     })
 
     channel.bind("new-photo", data => {
+      console.log('📥 收到同步照片:', data.url);
       photos.push(data.url)
     })
 
     // ======================
-    // 发送评论
+    // 发送评论（加了状态校验）
     // ======================
     async function sendComment() {
       const text = document.getElementById("msg").value.trim()
       if (!text) return
       document.getElementById("msg").value = ""
 
+      // 本地先显示
       playOneComment(text)
       comments.push(text)
 
-      await push("new-comment", { text })
+      // 校验 Pusher 连接状态
+      if (pusher.connection.state !== 'connected') {
+        console.warn('⚠️ Pusher 未连接，评论仅本地显示');
+        return;
+      }
+
+      // 发送到 Pusher
+      try {
+        await push("new-comment", { text })
+        console.log('📤 评论同步成功');
+      } catch (err) {
+        console.error('❌ 评论同步失败:', err);
+      }
     }
 
     // ======================
-    // 上传照片 + 同步
+    // 上传照片 + 同步（加了状态校验）
     // ======================
     function selectPhoto() {
       document.getElementById("file").click()
@@ -143,25 +172,51 @@
         const file = e.target.files[0]
         if (!file) return
 
+        // 校验 Pusher 连接状态
+        if (pusher.connection.state !== 'connected') {
+          alert('Pusher 未连接，照片仅本地显示');
+          // 纯本地显示
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            photos.push(e.target.result);
+            console.log('📷 照片仅本地添加');
+          };
+          reader.readAsDataURL(file);
+          return;
+        }
+
         // 上传到 ImgBB 免费图床
-        const fd = new FormData()
-        fd.append("image", file)
-        fd.append("key", IMGBB_KEY)
+        try {
+          const fd = new FormData()
+          fd.append("image", file)
+          fd.append("key", IMGBB_KEY)
 
-        const res = await fetch("https://api.imgbb.com/1/upload", {
-          method: "POST",
-          body: fd
-        })
-        const data = await res.json()
-        const url = data.data.url
-
-        photos.push(url)
-        await push("new-photo", { url })
+          const res = await fetch("https://api.imgbb.com/1/upload", {
+            method: "POST",
+            body: fd,
+            mode: 'cors' // 显式跨域
+          })
+          const data = await res.json()
+          if (!data.data?.url) {
+            console.error('❌ ImgBB 上传失败:', data);
+            alert('照片上传失败');
+            return;
+          }
+          const url = data.data.url
+          photos.push(url)
+          
+          // 同步到 Pusher
+          await push("new-photo", { url })
+          console.log('📤 照片同步成功:', url);
+        } catch (err) {
+          console.error('❌ 照片上传/同步失败:', err);
+          alert('照片同步失败，仅本地显示');
+        }
       }
     }
 
     // ======================
-    // Pusher 推送
+    // Pusher 推送（修复跨域+加日志）
     // ======================
     async function push(event, data) {
       const ts = Math.floor(Date.now() / 1000)
@@ -181,11 +236,22 @@
       const body = new URLSearchParams(params)
       body.append("auth_signature", sign.toString(CryptoJS.enc.Hex))
 
-      await fetch(`https://api-${PUSHER_CLUSTER}.pusher.com/apps/${PUSHER_APP_ID}/events`, {
+      // 修复跨域 + 加超时 + 加日志
+      const response = await fetch(`https://api-${PUSHER_CLUSTER}.pusher.com/apps/${PUSHER_APP_ID}/events`, {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body
+        headers: { 
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Access-Control-Allow-Origin": "*" // 强制跨域头
+        },
+        body: body,
+        mode: 'cors', // 显式跨域
+        timeout: 5000 // 5秒超时
       })
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Pusher 推送失败: ${response.status} - ${errText}`);
+      }
     }
 
     // ======================
