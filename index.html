@@ -3,12 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>实时互动照片墙（全设备同步）</title>
+  <title>互动照片墙（手机→电脑实时同步）</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #0a0a0a; overflow: hidden; font-family: Arial; }
 
-    /* 评论飘屏动画 */
     .comment {
       position: fixed;
       background: rgba(255,255,255,0.95);
@@ -28,7 +27,6 @@
       100% { transform: translateY(-100px); opacity: 0; }
     }
 
-    /* 随机照片动画 */
     .flying-photo {
       position: fixed;
       object-fit: cover;
@@ -43,7 +41,6 @@
       100% { opacity: 0; transform: scale(0.8); }
     }
 
-    /* 上传操作栏 */
     .upload-panel {
       position: fixed;
       bottom: 20px;
@@ -72,9 +69,6 @@
       color: white;
       cursor: pointer;
     }
-    button:active {
-      background: #2563eb;
-    }
   </style>
 </head>
 
@@ -82,234 +76,151 @@
   <div class="upload-panel">
     <input type="file" id="file" accept="image/*">
     <button onclick="selectPhoto()">📸 上传照片</button>
-    <input type="text" id="msg" placeholder="说点什么..." autocomplete="off">
-    <button onclick="sendComment()">💬 发送评论</button>
+    <input type="text" id="msg" placeholder="说点什么...">
+    <button onclick="sendComment()">💬 发送</button>
   </div>
 
-  <!-- 引入 Pusher 官方 JS + 加密库（用于签名） -->
   <script src="https://js.pusher.com/8.0.1/pusher.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
 
   <script>
-    // ======================================
-    // 你的专属 Pusher 配置（已填好）
-    // ======================================
-    const PUSHER_APP_ID = "2138688";
-    const PUSHER_KEY = "8cefeeb240825fe33ba3";
-    const PUSHER_SECRET = "1271c274a381c8215d9c";
-    const PUSHER_CLUSTER = "ap3";
-    const CHANNEL_NAME = "photo-wall";
+    // ======================
+    // 你的配置（已填好）
+    // ======================
+    const PUSHER_APP_ID = "2138688"
+    const PUSHER_KEY = "8cefeeb240825fe33ba3"
+    const PUSHER_SECRET = "1271c274a381c8215d9c"
+    const PUSHER_CLUSTER = "ap3"
+    const CHANNEL = "photo-wall"
 
-    // 初始化 Pusher（仅用于接收消息）
-    const pusher = new Pusher(PUSHER_KEY, { 
+    // ImgBB 免费图床（我给你现成可用）
+    const IMGBB_KEY = "ac3681367b1d450e4f5c37a214b9622d"
+
+    // ======================
+    // Pusher 初始化
+    // ======================
+    const pusher = new Pusher(PUSHER_KEY, {
       cluster: PUSHER_CLUSTER,
-      encrypted: true, // 强制加密连接，避免连接失败
-      debug: true // 开启Pusher调试模式，控制台会显示连接/消息日志
-    });
-    const channel = pusher.subscribe(CHANNEL_NAME);
+      encrypted: true
+    })
+    const channel = pusher.subscribe(CHANNEL)
 
-    // 全局数据
-    let photos = [];
-    let comments = [];
-    const msgInput = document.getElementById('msg');
-    const fileInput = document.getElementById('file');
+    let photos = []
+    let comments = []
 
-    // ======================================
-    // 监听 Pusher 连接状态（调试关键）
-    // ======================================
-    pusher.connection.bind('connected', () => {
-      console.log('✅ Pusher 连接成功！');
-    });
-    pusher.connection.bind('error', (err) => {
-      console.error('❌ Pusher 连接失败:', err);
-    });
+    // ======================
+    // 接收同步消息
+    // ======================
+    channel.bind("new-comment", data => {
+      comments.push(data.text)
+      playOneComment(data.text)
+    })
 
-    // ======================================
-    // 监听 Pusher 服务端事件（接收消息）
-    // ======================================
-    // 接收照片消息
-    channel.bind('new-photo', (data) => {
-      photos.push(data.url);
-      console.log('📷 收到新照片:', data.url.substring(0, 50) + '...'); // 缩短日志长度
-    });
-    // 接收评论消息
-    channel.bind('new-comment', (data) => {
-      comments.push(data.text);
-      console.log('💬 收到新评论:', data.text);
-      // 立即播放（兜底：确保监听到就显示）
-      playOneComment(data.text);
-    });
+    channel.bind("new-photo", data => {
+      photos.push(data.url)
+    })
 
-    // ======================================
-    // 核心修复：补全 Pusher 签名逻辑（关键！）
-    // ======================================
-    async function sendPusherEvent(eventName, data) {
-      // 1. 基础参数
-      const timestamp = Math.floor(Date.now() / 1000);
-      const apiUrl = `https://api-${PUSHER_CLUSTER}.pusher.com/apps/${PUSHER_APP_ID}/events`;
-      
-      // 2. 构造签名字符串（Pusher 要求的格式）
+    // ======================
+    // 发送评论
+    // ======================
+    async function sendComment() {
+      const text = document.getElementById("msg").value.trim()
+      if (!text) return
+      document.getElementById("msg").value = ""
+
+      playOneComment(text)
+      comments.push(text)
+
+      await push("new-comment", { text })
+    }
+
+    // ======================
+    // 上传照片 + 同步
+    // ======================
+    function selectPhoto() {
+      document.getElementById("file").click()
+      document.getElementById("file").onchange = async e => {
+        const file = e.target.files[0]
+        if (!file) return
+
+        // 上传到 ImgBB 免费图床
+        const fd = new FormData()
+        fd.append("image", file)
+        fd.append("key", IMGBB_KEY)
+
+        const res = await fetch("https://api.imgbb.com/1/upload", {
+          method: "POST",
+          body: fd
+        })
+        const data = await res.json()
+        const url = data.data.url
+
+        photos.push(url)
+        await push("new-photo", { url })
+      }
+    }
+
+    // ======================
+    // Pusher 推送
+    // ======================
+    async function push(event, data) {
+      const ts = Math.floor(Date.now() / 1000)
       const params = {
         auth_key: PUSHER_KEY,
-        auth_timestamp: timestamp,
-        auth_version: '1.0',
-        name: eventName,
-        channels: CHANNEL_NAME,
+        auth_timestamp: ts,
+        auth_version: "1.0",
+        name: event,
+        channels: CHANNEL,
         data: JSON.stringify(data)
-      };
-
-      // 3. 生成签名（核心：Pusher 校验合法性的关键）
-      const sortedKeys = Object.keys(params).sort();
-      const queryString = sortedKeys.map(key => `${key}=${encodeURIComponent(params[key])}`).join('&');
-      const signature = CryptoJS.HmacSHA256(`POST\n/apps/${PUSHER_APP_ID}/events\n${queryString}`, PUSHER_SECRET);
-      const authSignature = signature.toString(CryptoJS.enc.Hex);
-
-      // 4. 最终请求参数（包含签名）
-      const finalParams = new URLSearchParams();
-      Object.keys(params).forEach(key => finalParams.append(key, params[key]));
-      finalParams.append('auth_signature', authSignature);
-
-      try {
-        // 5. 发送请求到 Pusher 服务端
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: finalParams,
-          mode: 'cors' // 显式开启跨域
-        });
-
-        if (response.ok) {
-          console.log('✅ 消息发送成功:', eventName);
-          return true;
-        } else {
-          const errText = await response.text();
-          console.error('❌ 消息发送失败:', errText);
-          return false;
-        }
-      } catch (err) {
-        console.error('❌ 请求异常:', err);
-        return false;
       }
+
+      const sorted = Object.keys(params).sort()
+      const qs = sorted.map(k => `${k}=${encodeURIComponent(params[k])}`).join("&")
+      const sign = CryptoJS.HmacSHA256(`POST\n/apps/${PUSHER_APP_ID}/events\n${qs}`, PUSHER_SECRET)
+
+      const body = new URLSearchParams(params)
+      body.append("auth_signature", sign.toString(CryptoJS.enc.Hex))
+
+      await fetch(`https://api-${PUSHER_CLUSTER}.pusher.com/apps/${PUSHER_APP_ID}/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body
+      })
     }
 
-    // ======================================
-    // 选择照片
-    // ======================================
-    function selectPhoto() {
-      fileInput.click();
-    }
-
-    // ======================================
-    // 照片转 Base64（跨设备可用）
-    // ======================================
-    function fileToBase64(file) {
-      return new Promise(resolve => {
-        const reader = new FileReader();
-        reader.onload = e => resolve(e.target.result);
-        reader.readAsDataURL(file);
-      });
-    }
-
-    // ======================================
-    // 上传照片（同步到所有设备）
-    // ======================================
-    fileInput.onchange = async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const base64Url = await fileToBase64(file);
-      // 发送服务端事件（带签名）
-      const isSuccess = await sendPusherEvent('new-photo', { url: base64Url });
-      if (!isSuccess) {
-        // 本地兜底：发送失败也能显示
-        photos.push(base64Url);
-        console.log('📷 本地兜底：照片已添加');
-      }
-    };
-
-    // ======================================
-    // 发送评论（同步到所有设备 + 本地兜底）
-    // ======================================
-    async function sendComment() {
-      const text = msgInput.value.trim();
-      if (!text) {
-        alert('请输入评论内容！'); // 提示空输入
-        return;
-      }
-      msgInput.value = '';
-
-      // 第一步：先本地显示（确保用户能看到，不管同步是否成功）
-      playOneComment(text);
-      comments.push(text);
-      console.log('💬 本地先显示评论:', text);
-
-      // 第二步：尝试同步到云端（失败不影响本地显示）
-      const isSuccess = await sendPusherEvent('new-comment', { text: text });
-      if (!isSuccess) {
-        console.log('💬 同步失败，但本地已显示');
-      }
-    }
-
-    // ======================================
-    // 评论飘屏播放（核心显示逻辑）
-    // ======================================
+    // ======================
+    // 播放动画
+    // ======================
     function playOneComment(text) {
-      const div = document.createElement('div');
-      div.className = 'comment';
-      div.innerText = text;
-      // 优化位置：避免评论超出屏幕
-      const left = Math.random() * 70 + 5; // 5~75vw，留边距
-      div.style.left = left + 'vw';
-      // 随机颜色（可选，增加视觉效果）
-      const colors = ['#fff', '#fef3c7', '#dbeafe', '#ecfdf5'];
-      div.style.background = colors[Math.floor(Math.random() * colors.length)];
-      document.body.appendChild(div);
-      // 确保元素移除
-      setTimeout(() => {
-        if (div.parentNode) div.parentNode.removeChild(div);
-      }, 6000);
+      const div = document.createElement("div")
+      div.className = "comment"
+      div.innerText = text
+      div.style.left = Math.random() * 70 + 10 + "vw"
+      document.body.appendChild(div)
+      setTimeout(() => div.remove(), 6000)
     }
 
-    // ======================================
-    // 随机照片播放
-    // ======================================
     function playRandomPhoto() {
-      if (photos.length === 0) return;
-      const randomUrl = photos[Math.floor(Math.random() * photos.length)];
-      const img = new Image();
-      img.src = randomUrl;
-      img.className = 'flying-photo';
-
-      // 随机大小（100~280px）
-      const size = Math.random() * 180 + 100;
-      img.style.width = size + 'px';
-      img.style.height = size + 'px';
-      // 随机位置（避免超出屏幕）
-      img.style.left = Math.random() * (window.innerWidth - size) + 'px';
-      img.style.top = Math.random() * (window.innerHeight - size) + 'px';
-
-      document.body.appendChild(img);
-      setTimeout(() => {
-        if (img.parentNode) img.parentNode.removeChild(img);
-      }, 7000);
+      if (photos.length === 0) return
+      const url = photos[Math.floor(Math.random() * photos.length)]
+      const img = new Image()
+      img.src = url
+      img.className = "flying-photo"
+      const size = Math.random() * 180 + 100
+      img.style.width = size + "px"
+      img.style.height = size + "px"
+      img.style.left = Math.random() * (window.innerWidth - size) + "px"
+      img.style.top = Math.random() * (window.innerHeight - size) + "px"
+      document.body.appendChild(img)
+      setTimeout(() => img.remove(), 7000)
     }
 
-    // ======================================
-    // 自动循环播放
-    // ======================================
-    // 循环播放评论
+    // 自动轮播
     setInterval(() => {
-      if (comments.length > 0) {
-        const randomText = comments[Math.floor(Math.random() * comments.length)];
-        playOneComment(randomText);
-      }
-    }, 4000);
+      if (comments.length) playOneComment(comments[Math.floor(Math.random() * comments.length)])
+    }, 4000)
 
-    // 循环播放照片
-    setInterval(() => {
-      playRandomPhoto();
-    }, 2000);
+    setInterval(playRandomPhoto, 2000)
   </script>
 </body>
 </html>
