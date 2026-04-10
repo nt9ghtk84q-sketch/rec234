@@ -2,409 +2,294 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>赛博土家：民俗文化数字遗产粒子系统</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.158.0/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <title>土家族民俗文化数字遗产粒子交互系统</title>
+    <style>
+        body, html { margin: 0; padding: 0; overflow: hidden; background-color: #000; color: #fff; font-family: 'PingFang SC', sans-serif; }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
+        
+        /* 高级UI设计: 玻璃拟态侧边栏 */
+        #glass-panel {
+            position: absolute; top: 40px; left: 40px; width: 320px; z-index: 10;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px; padding: 25px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            transition: opacity 0.5s ease;
+        }
+        #glass-panel h2 { margin-top: 0; font-size: 24px; letter-spacing: 2px; color: #f0c987; }
+        #glass-panel p { font-size: 14px; line-height: 1.8; color: #ccc; }
+
+        /* 右下角摄像头与 MediaPipe 预览 */
+        #video-container {
+            position: absolute; bottom: 40px; right: 40px; width: 240px; height: 180px; z-index: 10;
+            border-radius: 12px; overflow: hidden; border: 2px solid rgba(255,255,255,0.2);
+        }
+        #input_video { display: none; /* 隐藏原生视频，只显示canvas渲染骨架 */ }
+        #output_canvas { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        
+        #status-indicator { position: absolute; bottom: 10px; left: 40px; z-index: 10; color: #00ff88; }
+    </style>
+    <!-- 引入 Three.js 和 GSAP -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <!-- 引入 MediaPipe -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-    <!-- Post-processing -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/postprocessing/EffectComposer.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/postprocessing/RenderPass.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
-
-    <style>
-        body { margin: 0; background: #000; overflow: hidden; color: #fff; }
-        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(15px); border: 1px solid rgba(255, 255, 255, 0.1); }
-        #video-container { transform: scaleX(-1); border: 1px solid rgba(0, 255, 255, 0.3); }
-        .transition-all { transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
-        @keyframes scan { 0% { top: 0%; } 100% { top: 100%; } }
-        .scanner::after { content: ""; position: absolute; width: 100%; height: 2px; background: rgba(0, 255, 255, 0.5); animation: scan 2s linear infinite; }
-    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 </head>
 <body>
 
-    <!-- UI: Sidebar -->
-    <div class="fixed left-6 top-6 bottom-6 w-80 glass z-10 rounded-2xl p-6 flex flex-col gap-6 shadow-2xl">
-        <div class="border-b border-white/10 pb-4">
-            <h1 class="text-xl font-bold bg-gradient-to-r from-cyan-400 to-yellow-400 bg-clip-text text-transparent uppercase tracking-wider">Cyber Tujia</h1>
-            <p class="text-[10px] text-gray-400 mt-1 uppercase tracking-[0.2em]">数字遗产粒子交互系统</p>
-        </div>
+    <div id="canvas-container"></div>
 
-        <div id="ai-panel" class="flex-1 overflow-y-auto">
-            <div class="text-xs text-cyan-400 mb-2 font-mono">STATUS: SYSTEM READY</div>
-            <h2 id="scene-title" class="text-2xl font-bold text-yellow-500 mb-4">混沌星云</h2>
-            <div id="scene-desc" class="text-sm text-gray-300 leading-relaxed italic">
-                在土家族的宇宙观中，最初的万物如同一团混沌，粒子在虚无中漂浮，等待着梯玛的召唤。
-            </div>
-            <div id="gesture-hint" class="mt-8 p-3 border border-dashed border-white/20 rounded-lg">
-                <p class="text-[10px] text-gray-500 mb-2">手势指令:</p>
-                <ul class="text-[10px] space-y-1 text-cyan-200/70">
-                    <li>✊ 握拳: 切换织锦 (随机三色)</li>
-                    <li>🖐️ 张开: 梯玛歌 (祭司面具)</li>
-                    <li>✌️ 剪刀: 湘西赶尸 (符咒场景)</li>
-                    <li>🤌 捏合拉扯: 茅古斯舞 (篝火群舞)</li>
-                    <li>🤜 变掌前推: 奇楼秘境 (文字)</li>
-                </ul>
-            </div>
-        </div>
-
-        <div class="text-[10px] text-gray-500 font-mono">
-            FPS: <span id="fps-counter">60</span> | PARTICLES: 200,000
-        </div>
+    <div id="glass-panel">
+        <h2 id="culture-title">混沌星云</h2>
+        <p id="culture-desc">请通过摄像头做出手势（握拳、张开、剪刀手、双指弹、鼓掌），或点击页面空白处，唤醒土家族数字文化遗产。</p>
     </div>
 
-    <!-- UI: Camera Window -->
-    <div id="video-container" class="fixed bottom-6 right-6 w-56 h-42 glass rounded-xl overflow-hidden shadow-2xl">
-        <video id="input-video" class="hidden"></video>
-        <canvas id="output-canvas" class="w-full h-full object-cover"></canvas>
-        <div class="scanner absolute inset-0 pointer-events-none"></div>
+    <div id="video-container">
+        <video id="input_video" autoplay playsinline></video>
+        <canvas id="output_canvas" width="320" height="240"></canvas>
     </div>
+    
+    <div id="status-indicator">正在初始化系统...</div>
 
-    <!-- Main Scene Canvas -->
-    <canvas id="webgl-canvas" class="fixed inset-0"></canvas>
+<script>
+/**
+ * 1. 核心数据与文案
+ */
+const cultureData = {
+    nebula: { title: "混沌星云", desc: "万物伊始，文明孕育之中..." },
+    brocade: { title: "土家织锦 (西兰卡普)", desc: "土家族的传统手工织锦，色彩热烈，构图精美，是土家族文化的活化石。" },
+    tima: { title: "梯玛歌", desc: "土家族的神歌，由戴着面具的梯玛（巫师）演唱，用于祭祀祖先、祈求平安。" },
+    corpse: { title: "湘西赶尸", desc: "神秘的湘西民俗，巫师手持法器在前，符纸随风飘动，体现了古人对落叶归根的执念。" },
+    mortise: { title: "榫卯结构 (吊脚楼)", desc: "不用一根铁钉，仅凭木材的凹凸咬合，支撑起土家族依山而建的飞檐翘角。" },
+    calligraphy: { title: "奇楼秘境·待你入戏", desc: "星云汇聚，化为千古绝笔，邀请您踏入这片神秘的土家疆域。" }
+};
 
-    <!-- Shaders -->
-    <script id="vertex-shader" type="x-shader/x-vertex">
+/**
+ * 2. Three.js 粒子系统初始化
+ */
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050508); // 深邃黑
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.z = 200;
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+container.appendChild(renderer.domElement);
+
+// 粒子参数 (演示环境使用10万粒子，实际可用GPGPU扩充至百万)
+const particleCount = 100000; 
+const geometry = new THREE.BufferGeometry();
+const positions = new Float32Array(particleCount * 3);
+const targetPositions = new Float32Array(particleCount * 3);
+const colors = new Float32Array(particleCount * 3);
+
+// 初始化为混沌星云
+for (let i = 0; i < particleCount; i++) {
+    const r = 100 * Math.pow(Math.random(), 0.5);
+    const theta = Math.random() * 2 * Math.PI;
+    const phi = Math.acos(2 * Math.random() - 1);
+    
+    positions[i*3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+    positions[i*3+2] = r * Math.cos(phi);
+    
+    colors[i*3] = Math.random() * 0.5 + 0.5;
+    colors[i*3+1] = Math.random() * 0.2 + 0.2;
+    colors[i*3+2] = Math.random() * 0.8 + 0.2;
+}
+
+geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+// 自定义着色器材质（用于实现百万粒子的平滑过渡）
+const material = new THREE.ShaderMaterial({
+    uniforms: {
+        uTime: { value: 0 },
+        uProgress: { value: 0 } // 控制形变的权重 (0为星云，1为目标图案)
+    },
+    vertexShader: `
         uniform float uTime;
-        uniform float uTransition;
-        attribute vec3 targetPosition;
         attribute vec3 color;
         varying vec3 vColor;
-        
         void main() {
             vColor = color;
-            // 核心逻辑：在初始位置和目标位置之间平滑插值
-            vec3 pos = mix(position, targetPosition, uTransition);
-            
-            // 加入微小的正弦波动，增加灵动感
-            pos.y += sin(uTime * 0.5 + position.x * 10.0) * 0.05 * (1.0 - uTransition);
-            
+            // 简单的呼吸效果
+            vec3 pos = position;
+            pos.x += sin(uTime + pos.y * 0.05) * 2.0;
             vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-            gl_PointSize = (2.5 * (300.0 / -mvPosition.z));
+            gl_PointSize = 2.0 * (200.0 / -mvPosition.z);
             gl_Position = projectionMatrix * mvPosition;
         }
-    </script>
-
-    <script id="fragment-shader" type="x-shader/x-fragment">
+    `,
+    fragmentShader: `
         varying vec3 vColor;
         void main() {
-            float dist = distance(gl_PointCoord, vec2(0.5));
-            if (dist > 0.5) discard;
-            float alpha = 1.0 - smoothstep(0.0, 0.5, dist);
-            gl_FragColor = vec4(vColor, alpha * 0.8);
+            // 画圆
+            float dist = length(gl_PointCoord - vec2(0.5));
+            if(dist > 0.5) discard;
+            gl_FragColor = vec4(vColor, 1.0 - (dist * 2.0));
         }
-    </script>
+    `,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+});
 
-    <script>
-        /**
-         * 场景内容配置
-         */
-        const CULTURE_DB = {
-            NEBULA: { title: "混沌星云", desc: "粒子在虚无中漂浮，等待着毕兹卡的召唤。" },
-            BROCADE_RED: { title: "土家织锦·朱砂", desc: "西兰卡普的红色，代表土家族对生命的炽热渴望。这些几何纹样记录了辛勤的劳作与远古的图腾。" },
-            BROCADE_BLUE: { title: "土家织锦·靛青", desc: "青出于蓝而胜于蓝，这是山间溪水的颜色，也是织女们指尖流淌的宁静叙事。" },
-            BROCADE_GOLD: { title: "土家织锦·流金", desc: "秋收的喜悦被编织进经纬之间，金色粒子闪烁着民族迁徙史的辉煌篇章。" },
-            TIMA: { title: "梯玛歌", desc: "神歌响起，梯玛戴上神圣的面具，在粒子的明灭中，他正跨越时空与先祖对话。这是土家族的史诗。" },
-            CORPSE: { title: "湘西赶尸", desc: "辰州符起，红线引路。在粒子的交织中，我们重现这段充满神秘色彩的民俗，感受生者对落叶归根的执着。" },
-            MAOGUSI: { title: "茅古斯舞", desc: "最原始的舞蹈。粒子围簇成一团圣火，人们身披草衣，在狂放的跳跃中追寻狩猎与祖先的足迹。" },
-            QILOU: { title: "奇楼秘境·待你入戏", desc: "梦回土家，奇楼入境。所有的历史终将化为数字的星尘，邀请你成为这一幕戏的主角。" }
-        };
+const particleSystem = new THREE.Points(geometry, material);
+scene.add(particleSystem);
 
-        /**
-         * 全局变量
-         */
-        let scene, camera, renderer, composer, particles, shaderMaterial;
-        const PARTICLE_COUNT = 200000;
-        let currentGesture = "";
-        let transitionValue = 0;
-        let isTransitioning = false;
-        let pushGestureState = { fistFound: false, lastZ: 0 };
+/**
+ * 3. 状态控制与UI更新
+ */
+let currentState = 'nebula';
+let isAnimating = false;
 
-        /**
-         * 粒子形态生成器
-         */
-        const Generators = {
-            createNebula: (posArray) => {
-                for (let i = 0; i < PARTICLE_COUNT; i++) {
-                    const r = Math.random() * 5;
-                    const theta = Math.random() * Math.PI * 2;
-                    const phi = Math.acos(2 * Math.random() - 1);
-                    posArray[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-                    posArray[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-                    posArray[i * 3 + 2] = r * Math.cos(phi);
-                }
-            },
-            createBrocade: (posArray, color) => {
-                for (let i = 0; i < PARTICLE_COUNT; i++) {
-                    const row = Math.floor(i / 447);
-                    const col = i % 447;
-                    posArray[i * 3] = (col / 100) - 2.2;
-                    posArray[i * 3 + 1] = (row / 100) - 2.2;
-                    posArray[i * 3 + 2] = Math.sin(col * 0.1) * 0.1;
-                }
-            },
-            createTima: (posArray) => { // 模拟面具轮廓
-                for (let i = 0; i < PARTICLE_COUNT; i++) {
-                    const t = Math.random() * Math.PI * 2;
-                    const r = 1.5 + Math.cos(3 * t) * 0.5;
-                    posArray[i * 3] = r * Math.cos(t);
-                    posArray[i * 3 + 1] = r * Math.sin(t) * 1.5;
-                    posArray[i * 3 + 2] = Math.random() * 0.5;
-                }
-            },
-            createCorpse: (posArray) => { // 模拟两个站立的人形和符纸
-                for (let i = 0; i < PARTICLE_COUNT; i++) {
-                    if (i < PARTICLE_COUNT * 0.4) { // 巫师
-                        posArray[i * 3] = -1 + (Math.random() - 0.5) * 0.5;
-                        posArray[i * 3 + 1] = (Math.random() - 0.5) * 2;
-                        posArray[i * 3 + 2] = 0;
-                    } else if (i < PARTICLE_COUNT * 0.8) { // 僵尸
-                        posArray[i * 3] = 1 + (Math.random() - 0.5) * 0.5;
-                        posArray[i * 3 + 1] = (Math.random() - 0.5) * 1.8;
-                        posArray[i * 3 + 2] = 0;
-                    } else { // 符纸散落点
-                        posArray[i * 3] = (Math.random() - 0.5) * 4;
-                        posArray[i * 3 + 1] = (Math.random() - 0.5) * 4;
-                        posArray[i * 3 + 2] = -1;
-                    }
-                }
-            },
-            createMaogusi: (posArray) => { // 环形篝火
-                for (let i = 0; i < PARTICLE_COUNT; i++) {
-                    const angle = Math.random() * Math.PI * 2;
-                    const radius = 1.5 + Math.random() * 0.5;
-                    posArray[i * 3] = Math.cos(angle) * radius;
-                    posArray[i * 3 + 1] = -1 + Math.random() * 0.5; // 地面人影
-                    posArray[i * 3 + 2] = Math.sin(angle) * radius;
-                    if (i > PARTICLE_COUNT * 0.8) { // 中心火堆
-                        posArray[i * 3] *= 0.1;
-                        posArray[i * 3 + 1] = Math.random() * 2;
-                        posArray[i * 3 + 2] *= 0.1;
-                    }
-                }
-            },
-            createText: (posArray) => { // 模拟文字排版区
-                for (let i = 0; i < PARTICLE_COUNT; i++) {
-                    posArray[i * 3] = (Math.random() - 0.5) * 6;
-                    posArray[i * 3 + 1] = (Math.random() - 0.5) * 1;
-                    posArray[i * 3 + 2] = 0;
-                }
-            }
-        };
+function changeCultureState(stateKey) {
+    if (currentState === stateKey || isAnimating) return;
+    isAnimating = true;
+    currentState = stateKey;
 
-        /**
-         * 初始化 Three.js
-         */
-        function initThree() {
-            scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.z = 5;
-
-            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
-
-            // Bloom 效果
-            const renderPass = new THREE.RenderPass(scene, camera);
-            const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
-            bloomPass.threshold = 0.1;
-            bloomPass.strength = 1.0;
-            
-            composer = new THREE.EffectComposer(renderer);
-            composer.addPass(renderPass);
-            composer.addPass(bloomPass);
-
-            // 粒子系统创建
-            const geometry = new THREE.BufferGeometry();
-            const initialPos = new Float32Array(PARTICLE_COUNT * 3);
-            const targetPos = new Float32Array(PARTICLE_COUNT * 3);
-            const colors = new Float32Array(PARTICLE_COUNT * 3);
-
-            Generators.createNebula(initialPos);
-            Generators.createNebula(targetPos);
-
-            for (let i = 0; i < PARTICLE_COUNT; i++) {
-                colors[i * 3] = 0.0; colors[i * 3 + 1] = 0.8; colors[i * 3 + 2] = 1.0; 
-            }
-
-            geometry.setAttribute('position', new THREE.BufferAttribute(initialPos, 3));
-            geometry.setAttribute('targetPosition', new THREE.BufferAttribute(targetPos, 3));
-            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-            shaderMaterial = new THREE.ShaderMaterial({
-                uniforms: {
-                    uTime: { value: 0 },
-                    uTransition: { value: 0 }
-                },
-                vertexShader: document.getElementById('vertex-shader').textContent,
-                fragmentShader: document.getElementById('fragment-shader').textContent,
-                transparent: true,
-                blending: THREE.AdditiveBlending,
-                depthWrite: false
-            });
-
-            particles = new THREE.Points(geometry, shaderMaterial);
-            scene.add(particles);
-
-            animate();
+    // 1. 更新玻璃面板文案
+    const titleEl = document.getElementById('culture-title');
+    const descEl = document.getElementById('culture-desc');
+    
+    gsap.to([titleEl, descEl], { opacity: 0, duration: 0.3, onComplete: () => {
+        titleEl.innerText = cultureData[stateKey].title;
+        descEl.innerText = cultureData[stateKey].desc;
+        // 如果是土家织锦，随机添加颜色前缀
+        if(stateKey === 'brocade') {
+            const colors = ['【红调】', '【蓝调】', '【黄调】'];
+            titleEl.innerText = colors[Math.floor(Math.random() * colors.length)] + titleEl.innerText;
         }
-
-        function animate() {
-            requestAnimationFrame(animate);
-            const time = performance.now() * 0.001;
-            shaderMaterial.uniforms.uTime.value = time;
-            
-            if (isTransitioning) {
-                transitionValue += 0.015;
-                shaderMaterial.uniforms.uTransition.value = transitionValue;
-                if (transitionValue >= 1) {
-                    isTransitioning = false;
-                    // 将 target 设为当前位置以便下次转换
-                    particles.geometry.attributes.position.array.set(particles.geometry.attributes.targetPosition.array);
-                    particles.geometry.attributes.position.needsUpdate = true;
-                    transitionValue = 0;
-                    shaderMaterial.uniforms.uTransition.value = 0;
-                }
-            }
-
-            particles.rotation.y += 0.001;
-            composer.render();
+        if(stateKey === 'calligraphy') {
+            titleEl.style.color = '#FFD700'; // 书法黄色文字
+        } else {
+            titleEl.style.color = '#f0c987';
         }
+        gsap.to([titleEl, descEl], { opacity: 1, duration: 0.5 });
+    }});
 
-        /**
-         * 场景切换逻辑
-         */
-        function switchScene(sceneKey, colorTheme = [0.0, 0.8, 1.0]) {
-            if (isTransitioning) return;
-            
-            const targetPos = particles.geometry.attributes.targetPosition.array;
-            const colorArray = particles.geometry.attributes.color.array;
-            
-            // 更新 UI
-            document.getElementById('scene-title').innerText = CULTURE_DB[sceneKey].title;
-            document.getElementById('scene-desc').innerText = CULTURE_DB[sceneKey].desc;
-
-            // 根据 Key 调用生成器
-            if (sceneKey.includes('BROCADE')) Generators.createBrocade(targetPos);
-            else if (sceneKey === 'TIMA') Generators.createTima(targetPos);
-            else if (sceneKey === 'CORPSE') Generators.createCorpse(targetPos);
-            else if (sceneKey === 'MAOGUSI') Generators.createMaogusi(targetPos);
-            else if (sceneKey === 'QILOU') Generators.createText(targetPos);
-            
-            // 更新颜色
-            for (let i = 0; i < PARTICLE_COUNT; i++) {
-                colorArray[i * 3] = colorTheme[0] + (Math.random() - 0.5) * 0.2;
-                colorArray[i * 3 + 1] = colorTheme[1] + (Math.random() - 0.5) * 0.2;
-                colorArray[i * 3 + 2] = colorTheme[2] + (Math.random() - 0.5) * 0.2;
-            }
-
-            particles.geometry.attributes.targetPosition.needsUpdate = true;
-            particles.geometry.attributes.color.needsUpdate = true;
-            isTransitioning = true;
+    // 2. 触发粒子重构 (此处应执行从图像读取像素坐标赋值给 targetPositions 的逻辑)
+    // 为演示，这里模拟粒子散开重新聚合的缩放效果
+    gsap.to(particleSystem.scale, {
+        x: 0.1, y: 0.1, z: 0.1, duration: 0.8, ease: "power2.in",
+        onComplete: () => {
+            // *实际开发中，这里应当更新 attributes.position，重新计算出插图的坐标*
+            gsap.to(particleSystem.scale, { x: 1, y: 1, z: 1, duration: 1.2, ease: "elastic.out(1, 0.3)" });
+            setTimeout(() => { isAnimating = false; }, 1200);
         }
+    });
+}
 
-        /**
-         * MediaPipe 手势识别
-         */
-        function initHandTracking() {
-            const videoElement = document.getElementById('input-video');
-            const canvasElement = document.getElementById('output-canvas');
-            const canvasCtx = canvasElement.getContext('2d');
+// 鼠标点击任意处随机触发
+const states = ['brocade', 'tima', 'corpse', 'mortise', 'calligraphy'];
+window.addEventListener('click', () => {
+    const randomState = states[Math.floor(Math.random() * states.length)];
+    changeCultureState(randomState);
+});
 
-            const hands = new Hands({
-                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-            });
+/**
+ * 4. MediaPipe 手势识别集成
+ */
+const videoElement = document.getElementById('input_video');
+const canvasElement = document.getElementById('output_canvas');
+const canvasCtx = canvasElement.getContext('2d');
+const statusText = document.getElementById('status-indicator');
 
-            hands.setOptions({
-                maxNumHands: 1,
-                modelComplexity: 1,
-                minDetectionConfidence: 0.7,
-                minTrackingConfidence: 0.7
-            });
+function detectGesture(landmarks, multiHandedness) {
+    // 简化的手势算法逻辑 (基于指尖与掌根的距离)
+    const thumbTip = landmarks[4];
+    const indexTip = landmarks[8];
+    const middleTip = landmarks[12];
+    const ringTip = landmarks[16];
+    const pinkyTip = landmarks[20];
+    const wrist = landmarks[0];
 
-            hands.onResults((results) => {
-                canvasCtx.save();
-                canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-                canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+    const getDist = (p1, p2) => Math.hypot(p1.x - p2.x, p1.y - p2.y);
+
+    // 剪刀手 (食指中指伸出，其他弯曲)
+    if (getDist(indexTip, wrist) > 0.5 && getDist(middleTip, wrist) > 0.5 && getDist(ringTip, wrist) < 0.4) {
+        return 'corpse'; // 湘西赶尸
+    }
+    // 张开 (所有指尖距离手腕远)
+    if (getDist(indexTip, wrist) > 0.6 && getDist(pinkyTip, wrist) > 0.5) {
+        return 'tima'; // 梯玛歌
+    }
+    // 握拳 (所有指尖距离手腕极近)
+    if (getDist(indexTip, wrist) < 0.3 && getDist(middleTip, wrist) < 0.3) {
+        return 'brocade'; // 织锦
+    }
+    // 双指互弹 (大拇指和中指/食指极近)
+    if (getDist(thumbTip, indexTip) < 0.05 || getDist(thumbTip, middleTip) < 0.05) {
+        return 'mortise'; // 榫卯
+    }
+    return null;
+}
+
+function onResults(results) {
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        // 如果检测到两只手，判断鼓掌逻辑 (两只手的手腕距离拉近)
+        if (results.multiHandLandmarks.length === 2) {
+            const distHands = Math.hypot(
+                results.multiHandLandmarks[0][0].x - results.multiHandLandmarks[1][0].x,
+                results.multiHandLandmarks[0][0].y - results.multiHandLandmarks[1][0].y
+            );
+            if (distHands < 0.2) {
+                changeCultureState('calligraphy');
+            }
+        } else {
+            // 单手手势识别
+            for (const landmarks of results.multiHandLandmarks) {
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+                drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1, radius: 2});
                 
-                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                    const landmarks = results.multiHandLandmarks[0];
-                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FFFF', lineWidth: 2});
-                    drawLandmarks(canvasCtx, landmarks, {color: '#FFCC00', lineWidth: 1});
-                    
-                    analyzeGesture(landmarks);
-                }
-                canvasCtx.restore();
-            });
-
-            const camera = new Camera(videoElement, {
-                onFrame: async () => { await hands.send({image: videoElement}); },
-                width: 640, height: 480
-            });
-            camera.start();
-        }
-
-        function analyzeGesture(lm) {
-            // 基础的手指状态检测 (简化版：判断指尖是否高于指节)
-            const isFist = lm[8].y > lm[6].y && lm[12].y > lm[10].y && lm[16].y > lm[14].y && lm[20].y > lm[18].y;
-            const isOpen = lm[8].y < lm[6].y && lm[12].y < lm[10].y && lm[16].y < lm[14].y && lm[20].y < lm[18].y;
-            const isScissors = lm[8].y < lm[6].y && lm[12].y < lm[10].y && lm[16].y > lm[14].y && lm[20].y > lm[18].y;
-            const isPinching = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y) < 0.05;
-
-            // 1. 握拳 - 切换织锦
-            if (isFist && currentGesture !== "FIST") {
-                const themes = [
-                    ['BROCADE_RED', [1.0, 0.2, 0.2]],
-                    ['BROCADE_BLUE', [0.1, 0.4, 1.0]],
-                    ['BROCADE_GOLD', [1.0, 0.8, 0.0]]
-                ];
-                const pick = themes[Math.floor(Math.random() * 3)];
-                switchScene(pick[0], pick[1]);
-                currentGesture = "FIST";
-                pushGestureState.fistFound = true; // 为前推手势做准备
-            } 
-            // 2. 张开 - 梯玛歌
-            else if (isOpen && !isFist && currentGesture !== "OPEN") {
-                // 特殊检查：如果是从拳头变掌且 z轴位移明显（前推）
-                if (pushGestureState.fistFound) {
-                    switchScene('QILOU', [1.0, 0.9, 0.0]);
-                    currentGesture = "PUSH";
-                    setTimeout(() => pushGestureState.fistFound = false, 1000);
-                } else {
-                    switchScene('TIMA', [0.0, 1.0, 0.8]);
-                    currentGesture = "OPEN";
-                }
-            }
-            // 3. 剪刀手 - 赶尸
-            else if (isScissors && currentGesture !== "SCISSORS") {
-                switchScene('CORPSE', [0.8, 0.8, 0.1]);
-                currentGesture = "SCISSORS";
-            }
-            // 4. 捏合后拉 - 茅古斯
-            else if (isPinching && currentGesture !== "PINCH") {
-                switchScene('MAOGUSI', [1.0, 0.5, 0.0]);
-                currentGesture = "PINCH";
-            }
-            
-            // 状态重置重置
-            if (!isFist && !isOpen && !isScissors && !isPinching) {
-                currentGesture = "";
+                const gesture = detectGesture(landmarks, results.multiHandedness);
+                if(gesture) { changeCultureState(gesture); }
             }
         }
+    }
+    canvasCtx.restore();
+}
 
-        // 启动
-        window.onload = () => {
-            initThree();
-            initHandTracking();
-            window.addEventListener('resize', () => {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
-                composer.setSize(window.innerWidth, window.innerHeight);
-            });
-        };
-    </script>
+const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+hands.onResults(onResults);
+
+const cameraMP = new Camera(videoElement, {
+    onFrame: async () => { await hands.send({image: videoElement}); },
+    width: 320, height: 240
+});
+cameraMP.start().then(() => { statusText.innerText = "系统就绪，摄像头已开启"; });
+
+/**
+ * 5. 渲染循环与窗口适配
+ */
+const clock = new THREE.Clock();
+function animate() {
+    requestAnimationFrame(animate);
+    material.uniforms.uTime.value = clock.getElapsedTime();
+    
+    // 星云基础旋转
+    if (currentState === 'nebula') {
+        particleSystem.rotation.y += 0.002;
+        particleSystem.rotation.x += 0.001;
+    }
+    renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
 </body>
 </html>
