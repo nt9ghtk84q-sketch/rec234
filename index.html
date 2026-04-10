@@ -1,226 +1,439 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>互动照片墙（手机→电脑实时同步）</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #0a0a0a; overflow: hidden; font-family: Arial; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>赛博土家：民俗文化数字遗产粒子系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js & Plugins -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.158.0/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/OBJLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/shaders/CopyShader.js"></script>
+    <!-- MediaPipe -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
-    .comment {
-      position: fixed;
-      background: rgba(255,255,255,0.95);
-      color: #222;
-      padding: 8px 14px;
-      border-radius: 50px;
-      font-size: 14px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.2);
-      animation: float 6s linear forwards;
-      white-space: nowrap;
-      z-index: 999;
-    }
-    @keyframes float {
-      0% { transform: translateY(100vh); opacity: 0; }
-      10% { opacity: 1; }
-      90% { opacity: 1; }
-      100% { transform: translateY(-100px); opacity: 0; }
-    }
-
-    .flying-photo {
-      position: fixed;
-      object-fit: cover;
-      border-radius: 10px;
-      animation: fly 7s ease-in-out forwards;
-      z-index: 10;
-    }
-    @keyframes fly {
-      0% { opacity: 0; transform: scale(0.8); }
-      20% { opacity: 1; transform: scale(1); }
-      80% { opacity: 1; transform: scale(1); }
-      100% { opacity: 0; transform: scale(0.8); }
-    }
-
-    .upload-panel {
-      position: fixed;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #fff;
-      padding: 10px 15px;
-      border-radius: 20px;
-      display: flex;
-      gap: 10px;
-      z-index: 9999;
-    }
-    #file { display: none; }
-    button, input[type="text"] {
-      padding: 8px 12px;
-      border-radius: 10px;
-      border: none;
-      font-size: 14px;
-    }
-    input[type="text"] {
-      border: 1px solid #ddd;
-      min-width: 160px;
-    }
-    button {
-      background: #3b82f6;
-      color: white;
-      cursor: pointer;
-    }
-  </style>
-  <!-- 插入 ImgBB SDK 脚本 -->
-  <script async src="//imgbb.ws/sdk/pup.js" data-url="https://imgbb.ws/upload"></script>
+    <style>
+        body { margin: 0; background-color: #000406; overflow: hidden; color: white; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .glass { background: rgba(0, 20, 30, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(0, 255, 255, 0.2); }
+        #video-container { transform: scaleX(-1); border: 2px solid #0ff; }
+        .cyber-gradient { background: linear-gradient(135deg, #00ffff 0%, #ffd700 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .loading-circle { stroke-dasharray: 100; stroke-dashoffset: 100; transition: stroke-dashoffset 0.1s linear; }
+    </style>
 </head>
-
 <body>
-  <div class="upload-panel">
-    <input type="file" id="file" accept="image/*">
-    <button onclick="selectPhoto()">📸 上传照片</button>
-    <input type="text" id="msg" placeholder="说点什么...">
-    <button onclick="sendComment()">💬 发送</button>
-  </div>
 
-  <script src="https://js.pusher.com/8.0.1/pusher.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+    <!-- UI: Sidebar -->
+    <div class="fixed left-0 top-0 h-full w-72 glass z-10 p-6 flex flex-col gap-6 transform transition-transform duration-500" id="sidebar">
+        <h1 class="text-2xl font-bold cyber-gradient">CYBER TUJIA</h1>
+        <div class="text-xs text-cyan-400 tracking-widest uppercase opacity-70">数字遗产粒子系统</div>
+        
+        <div class="mt-8">
+            <label class="block text-sm mb-2 text-cyan-300">上传民俗OBJ模型</label>
+            <input type="file" id="obj-upload" accept=".obj" class="hidden" />
+            <button onclick="document.getElementById('obj-upload').click()" class="w-full py-3 border border-cyan-500/50 hover:bg-cyan-500/20 transition rounded-sm text-sm">
+                选取本地模型文件
+            </button>
+        </div>
 
-  <script>
-    // ======================
-    // 你的配置（已填好）
-    // ======================
-    const PUSHER_APP_ID = "2138688"
-    const PUSHER_KEY = "8cefeeb240825fe33ba3"
-    const PUSHER_SECRET = "1271c274a381c8215d9c"
-    const PUSHER_CLUSTER = "ap3"
-    const CHANNEL = "photo-wall"
+        <div class="flex-1 mt-4">
+            <div class="text-xs text-gray-400 mb-2 underline">快速预览点位</div>
+            <div id="model-list" class="flex flex-col gap-2">
+                <button onclick="loadDemoModel('Xilankapu')" class="text-left p-2 hover:bg-white/10 text-sm rounded">西兰卡普织锦纹样</button>
+                <button onclick="loadDemoModel('DiaoJiaoLou')" class="text-left p-2 hover:bg-white/10 text-sm rounded">吊脚楼构件</button>
+            </div>
+        </div>
 
-    // ======================
-    // Pusher 初始化
-    // ======================
-    const pusher = new Pusher(PUSHER_KEY, {
-      cluster: PUSHER_CLUSTER,
-      encrypted: true
-    })
-    const channel = pusher.subscribe(CHANNEL)
+        <div class="p-4 border-t border-white/10">
+            <div class="flex items-center gap-2 mb-2">
+                <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <span class="text-xs text-gray-300">手势感应系统 已就绪</span>
+            </div>
+        </div>
+    </div>
 
-    let photos = []
-    let comments = []
+    <!-- UI: AI Interpretation Panel -->
+    <div class="fixed top-10 right-10 w-80 glass p-6 z-10 rounded-xl transition-all duration-700 opacity-0 translate-y-10" id="ai-panel">
+        <div class="text-gold-400 text-xs mb-2 flex items-center gap-2">
+            <span class="bg-yellow-500 w-1 h-3"></span> AI 赋能解说
+        </div>
+        <div id="ai-title" class="text-xl font-bold text-white mb-3 tracking-wide"></div>
+        <div id="ai-content" class="text-sm text-gray-300 leading-relaxed italic"></div>
+    </div>
 
-    // ======================
-    // 接收同步消息
-    // ======================
-    channel.bind("new-comment", data => {
-      comments.push(data.text)
-      playOneComment(data.text)
-    })
+    <!-- UI: Hand Tracking Window -->
+    <div class="fixed bottom-6 right-6 w-48 h-36 glass rounded-lg overflow-hidden z-20">
+        <video id="input-video" class="hidden"></video>
+        <canvas id="output-canvas" class="w-full h-full object-cover"></canvas>
+        <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <svg class="w-16 h-16 transform -rotate-90">
+                <circle cx="32" cy="32" r="28" stroke="rgba(0,255,255,0.2)" stroke-width="4" fill="none" />
+                <circle id="ok-progress" cx="32" cy="32" r="28" stroke="#ffd700" stroke-width="4" fill="none" class="loading-circle" />
+            </svg>
+        </div>
+    </div>
 
-    channel.bind("new-photo", data => {
-      photos.push(data.url)
-    })
+    <!-- Main Canvas -->
+    <canvas id="webgl-canvas" class="fixed inset-0"></canvas>
 
-    // ======================
-    // 发送评论
-    // ======================
-    async function sendComment() {
-      const text = document.getElementById("msg").value.trim()
-      if (!text) return
-      document.getElementById("msg").value = ""
+    <script id="vertexShader" type="x-shader/x-vertex">
+        uniform float uTime;
+        uniform float uTransition;
+        attribute vec3 targetPosition;
+        attribute vec3 color;
+        varying vec3 vColor;
+        
+        void main() {
+            vColor = color;
+            // 混合初始星云状态与目标模型状态
+            vec3 pos = mix(position, targetPosition, uTransition);
+            
+            // 加上微小的波动动画
+            if(uTransition < 0.1) {
+                pos.x += sin(uTime * 0.5 + position.y) * 0.2;
+                pos.y += cos(uTime * 0.3 + position.x) * 0.2;
+            }
 
-      playOneComment(text)
-      comments.push(text)
-
-      await push("new-comment", { text })
-    }
-
-    // ======================
-    // 上传照片 + 同步（改用 ImgBB SDK 方式）
-    // ======================
-    function selectPhoto() {
-      // 调用 ImgBB SDK 上传弹窗
-      window.imgbbUploader({
-        success: async (response) => {
-          // 上传成功后获取图片 URL
-          const url = response.data.url;
-          if (!url) {
-            alert("照片上传失败，请重试");
-            return;
-          }
-          
-          // 本地保存 + 同步到 Pusher
-          photos.push(url)
-          await push("new-photo", { url })
-          alert("照片上传并同步成功！");
-        },
-        error: (error) => {
-          console.error("ImgBB 上传失败:", error);
-          alert("照片上传失败：" + error.message);
+            vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+            gl_PointSize = 2.0 * (300.0 / -mvPosition.z);
+            gl_Position = projectionMatrix * mvPosition;
         }
-      });
-    }
+    </script>
 
-    // ======================
-    // Pusher 推送
-    // ======================
-    async function push(event, data) {
-      const ts = Math.floor(Date.now() / 1000)
-      const params = {
-        auth_key: PUSHER_KEY,
-        auth_timestamp: ts,
-        auth_version: "1.0",
-        name: event,
-        channels: CHANNEL,
-        data: JSON.stringify(data)
-      }
+    <script id="fragmentShader" type="x-shader/x-fragment">
+        varying vec3 vColor;
+        void main() {
+            float dist = distance(gl_PointCoord, vec2(0.5));
+            if (dist > 0.5) discard;
+            float strength = 1.0 - (dist * 2.0);
+            gl_FragColor = vec4(vColor, strength);
+        }
+    </script>
 
-      const sorted = Object.keys(params).sort()
-      const qs = sorted.map(k => `${k}=${encodeURIComponent(params[k])}`).join("&")
-      const sign = CryptoJS.HmacSHA256(`POST\n/apps/${PUSHER_APP_ID}/events\n${qs}`, PUSHER_SECRET)
+    <script>
+        /**
+         * 全局配置与状态
+         */
+        const CONFIG = {
+            particleCount: 200000,
+            colors: {
+                cyan: new THREE.Color(0x00ffff),
+                gold: new THREE.Color(0xffd700)
+            },
+            geminiKey: "YOUR_GEMINI_API_KEY" // 请填入实际Key
+        };
 
-      const body = new URLSearchParams(params)
-      body.append("auth_signature", sign.toString(CryptoJS.enc.Hex))
+        let scene, camera, renderer, composer, particles, shaderMaterial;
+        let targetPositions = new Float32Array(CONFIG.particleCount * 3);
+        let okGestureTimer = 0;
+        let isTransitioning = false;
+        let currentModelScale = 1.0;
+        let targetRotationY = 0;
 
-      await fetch(`https://api-${PUSHER_CLUSTER}.pusher.com/apps/${PUSHER_APP_ID}/events`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body,
-        mode: 'cors' // 新增跨域配置
-      })
-    }
+        /**
+         * 初始化 Three.js 系统
+         */
+        function initScene() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000406);
+            
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 5;
 
-    // ======================
-    // 播放动画
-    // ======================
-    function playOneComment(text) {
-      const div = document.createElement("div")
-      div.className = "comment"
-      div.innerText = text
-      div.style.left = Math.random() * 70 + 10 + "vw"
-      document.body.appendChild(div)
-      setTimeout(() => div.remove(), 6000)
-    }
+            renderer = new THREE.WebGLRenderer({
+                canvas: document.getElementById('webgl-canvas'),
+                antialias: false // 提高性能
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    function playRandomPhoto() {
-      if (photos.length === 0) return
-      const url = photos[Math.floor(Math.random() * photos.length)]
-      const img = new Image()
-      img.src = url
-      img.className = "flying-photo"
-      const size = Math.random() * 180 + 100
-      img.style.width = size + "px"
-      img.style.height = size + "px"
-      img.style.left = Math.random() * (window.innerWidth - size) + "px"
-      img.style.top = Math.random() * (window.innerHeight - size) + "px"
-      document.body.appendChild(img)
-      setTimeout(() => img.remove(), 7000)
-    }
+            // 后期处理：UnrealBloom
+            const renderScene = new THREE.RenderPass(scene, camera);
+            const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+            bloomPass.threshold = 0.2;
+            bloomPass.strength = 1.2;
+            bloomPass.radius = 0.5;
 
-    // 自动轮播
-    setInterval(() => {
-      if (comments.length) playOneComment(comments[Math.floor(Math.random() * comments.length)])
-    }, 4000)
+            composer = new THREE.EffectComposer(renderer);
+            composer.addPass(renderScene);
+            composer.addPass(bloomPass);
 
-    setInterval(playRandomPhoto, 2000)
-  </script>
+            // 粒子系统创建
+            createParticles();
+            
+            window.addEventListener('resize', onWindowResize);
+            animate();
+        }
+
+        function createParticles() {
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(CONFIG.particleCount * 3);
+            const colors = new Float32Array(CONFIG.particleCount * 3);
+            const targets = new Float32Array(CONFIG.particleCount * 3);
+
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                // 初始混沌状态：星云球体
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos((Math.random() * 2) - 1);
+                const r = 2.0 + Math.random() * 2.0;
+                
+                positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+                positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+                positions[i * 3 + 2] = r * Math.cos(phi);
+
+                // 默认目标也是初始位置
+                targets[i * 3] = positions[i * 3];
+                targets[i * 3 + 1] = positions[i * 3 + 1];
+                targets[i * 3 + 2] = positions[i * 3 + 2];
+
+                // 渐变色
+                const mixedColor = CONFIG.colors.cyan.clone().lerp(CONFIG.colors.gold, Math.random());
+                colors[i * 3] = mixedColor.r;
+                colors[i * 3 + 1] = mixedColor.g;
+                colors[i * 3 + 2] = mixedColor.b;
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('targetPosition', new THREE.BufferAttribute(targets, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            shaderMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uTransition: { value: 0 }
+                },
+                vertexShader: document.getElementById('vertexShader').textContent,
+                fragmentShader: document.getElementById('fragmentShader').textContent,
+                transparent: true,
+                blending: THREE.AdditiveBlending,
+                depthTest: false
+            });
+
+            particles = new THREE.Points(geometry, shaderMaterial);
+            scene.add(particles);
+        }
+
+        /**
+         * 模型加载与处理
+         */
+        const loader = new THREE.OBJLoader();
+
+        function handleObjUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const url = URL.createObjectURL(file);
+            loadModel(url, file.name);
+        }
+
+        function loadDemoModel(name) {
+            // 模拟加载逻辑
+            generateAIInterpretation(name);
+            triggerTransition();
+        }
+
+        function loadModel(url, name) {
+            loader.load(url, (obj) => {
+                const vertices = [];
+                obj.traverse((child) => {
+                    if (child.isMesh) {
+                        const pos = child.geometry.attributes.position;
+                        for (let i = 0; i < pos.count; i++) {
+                            vertices.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+                        }
+                    }
+                });
+
+                // 将模型顶点映射到20万个粒子
+                const newTargets = new Float32Array(CONFIG.particleCount * 3);
+                for (let i = 0; i < CONFIG.particleCount; i++) {
+                    const vIdx = (i % (vertices.length / 3)) * 3;
+                    newTargets[i * 3] = vertices[vIdx] * 0.5;
+                    newTargets[i * 3 + 1] = vertices[vIdx + 1] * 0.5;
+                    newTargets[i * 3 + 2] = vertices[vIdx + 2] * 0.5;
+                }
+                
+                particles.geometry.attributes.targetPosition.array = newTargets;
+                particles.geometry.attributes.targetPosition.needsUpdate = true;
+                
+                generateAIInterpretation(name);
+                triggerTransition();
+            });
+        }
+
+        function triggerTransition() {
+            isTransitioning = true;
+            let val = 0;
+            const timer = setInterval(() => {
+                val += 0.02;
+                shaderMaterial.uniforms.uTransition.value = val;
+                if (val >= 1) {
+                    clearInterval(timer);
+                    isTransitioning = false;
+                }
+            }, 16);
+        }
+
+        /**
+         * MediaPipe 手势逻辑
+         */
+        const videoElement = document.getElementById('input-video');
+        const canvasElement = document.getElementById('output-canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const okProgress = document.getElementById('ok-progress');
+
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+
+        hands.onResults(onResults);
+
+        function onResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+            
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00ffff', lineWidth: 2});
+                drawLandmarks(canvasCtx, landmarks, {color: '#ffd700', lineWidth: 1});
+
+                // 1. 平滑旋转 (基于手掌中心X坐标)
+                const palmX = landmarks[0].x;
+                targetRotationY = (palmX - 0.5) * Math.PI * 2;
+
+                // 2. 线性缩放 (拇指尖4与食指尖8的距离)
+                const thumbTip = landmarks[4];
+                const indexTip = landmarks[8];
+                const distance = Math.sqrt(
+                    Math.pow(thumbTip.x - indexTip.x, 2) + 
+                    Math.pow(thumbTip.y - indexTip.y, 2)
+                );
+                currentModelScale = THREE.MathUtils.lerp(currentModelScale, distance * 10, 0.1);
+
+                // 3. OK 手势检测 (拇指食指捏合，其他手指伸直)
+                const isPinching = distance < 0.05;
+                const ringExtended = landmarks[16].y < landmarks[14].y;
+                
+                if (isPinching && ringExtended) {
+                    okGestureTimer += 16; // 约16ms每帧
+                    const progress = Math.min((okGestureTimer / 1500) * 100, 100);
+                    okProgress.style.strokeDashoffset = 100 - progress;
+                    
+                    if (okGestureTimer >= 1500 && !isTransitioning) {
+                        switchScene();
+                        okGestureTimer = 0;
+                    }
+                } else {
+                    okGestureTimer = Math.max(0, okGestureTimer - 32);
+                    okProgress.style.strokeDashoffset = 100;
+                }
+            }
+            canvasCtx.restore();
+        }
+
+        const cameraMP = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        cameraMP.start();
+
+        /**
+         * AI 解说词生成 (集成 Gemini 逻辑)
+         */
+        async function generateAIInterpretation(modelName) {
+            const panel = document.getElementById('ai-panel');
+            const title = document.getElementById('ai-title');
+            const content = document.getElementById('ai-content');
+            
+            panel.classList.remove('opacity-0', 'translate-y-10');
+            title.innerText = "解析中...";
+            content.innerText = "正在通过数字经纬线重构土家记忆...";
+
+            // 模拟 Gemini 响应
+            setTimeout(() => {
+                const db = {
+                    "Xilankapu": {
+                        t: "西兰卡普：五彩斑斓的土家魂",
+                        c: "以丝为经，以棉为纬。这不仅仅是几何纹样的堆叠，更是武陵山区清晨第一抹朝霞的复刻。每一处转角都藏着毕兹卡先民对万物生灵的敬畏。"
+                    },
+                    "DiaoJiaoLou": {
+                        t: "吊脚楼：云端上的木构史诗",
+                        c: "半干栏式的智慧，在崇山峻岭间轻盈驻足。不用一钉一铆，粒子重构的榫卯结构，是土家族人与大地达成的温柔契约。"
+                    }
+                };
+                
+                const info = db[modelName] || { 
+                    t: `遗产档案：${modelName}`, 
+                    c: "此物乃土家族民俗之瑰宝，历经岁月洗礼，于赛博空间内完成数字化重构，其纹理蕴含民族迁徙之奥秘。"
+                };
+                
+                title.innerText = info.t;
+                content.innerText = info.c;
+            }, 1000);
+        }
+
+        /**
+         * 渲染循环
+         */
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = performance.now() * 0.001;
+            
+            if (particles) {
+                shaderMaterial.uniforms.uTime.value = time;
+                // 平滑应用旋转
+                particles.rotation.y = THREE.MathUtils.lerp(particles.rotation.y, targetRotationY, 0.05);
+                // 平滑应用缩放
+                const s = Math.max(0.5, Math.min(currentModelScale, 3.0));
+                particles.scale.set(s, s, s);
+            }
+            
+            composer.render();
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function switchScene() {
+            // 切换回混沌状态或下一个预设
+            if (shaderMaterial.uniforms.uTransition.value > 0.5) {
+                let val = 1;
+                const timer = setInterval(() => {
+                    val -= 0.02;
+                    shaderMaterial.uniforms.uTransition.value = val;
+                    if (val <= 0) {
+                        clearInterval(timer);
+                        document.getElementById('ai-panel').classList.add('opacity-0');
+                    }
+                }, 16);
+            }
+        }
+
+        // 初始化
+        window.onload = () => {
+            initScene();
+            document.getElementById('obj-upload').addEventListener('change', handleObjUpload);
+        };
+    </script>
 </body>
 </html>
